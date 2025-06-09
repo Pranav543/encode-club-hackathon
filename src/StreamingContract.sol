@@ -6,9 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
+import "./interfaces/IStreamingRecipient.sol";
+import "./libraries/StreamingErrors.sol";
+import "./libraries/StreamingHelpers.sol";
 
 contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
+    using Address for address;
 
     enum StreamShape {
         LINEAR,
@@ -23,20 +28,18 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         uint256 startTime;
         uint256 stopTime;
         uint256 remainingBalance;
-        uint256 ratePerSecond; // Only used for linear streams
+        uint256 ratePerSecond;
         bool isActive;
         bool cancelable;
         StreamShape shape;
-        // Logarithmic curve parameters
-        uint256 logScale; // Scaling factor for logarithmic calculations
-        uint256 logOffset; // Offset to ensure log domain is positive
+        uint256 logScale;
+        uint256 logOffset;
     }
 
-    // Struct to hold parameters for _createStream
     struct CreateStreamParams {
         address recipient;
         uint256 deposit;
-        address tokenAddress; // Keep as address, convert to IERC20 inside
+        address tokenAddress;
         uint256 startTime;
         uint256 stopTime;
         bool cancelable;
@@ -48,10 +51,15 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
     mapping(uint256 => Stream) public streams;
     uint256 private _streamIds;
 
-    uint256 public constant BROKER_FEE_PERCENTAGE = 100; // 1%
+    /// @notice Mapping of allowlisted hook contracts
+    mapping(address => bool) public isAllowlistedHook;
+
+    /// @notice Array of all allowlisted hooks for enumeration
+    address[] public allowlistedHooks;
+
+    uint256 public constant BROKER_FEE_PERCENTAGE = 100;
     uint256 public constant PERCENTAGE_SCALE = 10000;
-    uint256 public constant LOG_PRECISION = 1e18; // 18 decimal precision for log calculations
-    uint256 public constant MAX_LOG_INPUT = 1e36; // Maximum input for log function
+    uint256 public constant LOG_PRECISION = 1e18;
 
     event StreamCreated(
         uint256 indexed streamId,
@@ -79,36 +87,141 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         uint256 recipientBalance
     );
 
+    /// @notice Emitted when a hook is allowlisted
+    event HookAllowlisted(address indexed hook);
+
+    /// @notice Emitted when a hook call is made
+    event HookCalled(
+        address indexed hook,
+        uint256 indexed streamId,
+        bool success
+    );
+
     constructor(
         address initialOwner
     ) ERC721("Streaming NFT", "STREAM") Ownable(initialOwner) {}
 
+    // ============ HOOK MANAGEMENT ============
+
+    /// @notice Allowlists a hook contract
+    /// @param hook The address of the hook contract to allowlist
+    function allowlistHook(address hook) external onlyOwner {
+        if (hook == address(0)) revert StreamingErrors.HookZeroAddress();
+        if (isAllowlistedHook[hook])
+            revert StreamingErrors.HookAlreadyAllowlisted(hook);
+        if (!StreamingHelpers.checkInterface(hook))
+            revert StreamingErrors.HookUnsupportedInterface(hook);
+
+        isAllowlistedHook[hook] = true;
+        allowlistedHooks.push(hook);
+
+        emit HookAllowlisted(hook);
+    }
+
+    /// @notice Gets the total number of allowlisted hooks
+    /// @return The number of allowlisted hooks
+    function getAllowlistedHooksCount() external view returns (uint256) {
+        return allowlistedHooks.length;
+    }
+
+    /// @notice Gets all allowlisted hooks
+    /// @return Array of allowlisted hook addresses
+    function getAllowlistedHooks() external view returns (address[] memory) {
+        return allowlistedHooks;
+    }
+
+    /// @notice Checks if a hook is allowlisted
+    /// @param hook The hook address to check
+    /// @return Whether the hook is allowlisted
+    function isHookAllowlisted(address hook) external view returns (bool) {
+        return isAllowlistedHook[hook];
+    }
+
+    // ============ HOOK EXECUTION ============
+
+    /// @notice Executes withdraw hooks for a recipient if it's an allowlisted hook
+    /// @param streamId The ID of the stream
+    /// @param caller The address that called withdraw
+    /// @param to The address receiving the tokens
+    /// @param amount The amount being withdrawn
+    function _executeWithdrawHook(
+        uint256 streamId,
+        address caller,
+        address to,
+        uint256 amount
+    ) internal {
+        Stream storage stream = streams[streamId];
+        address recipient = stream.recipient;
+
+        if (!isAllowlistedHook[recipient]) return;
+
+        bytes memory data = abi.encodeCall(
+            IStreamingRecipient.onStreamingWithdraw,
+            (streamId, caller, to, amount)
+        );
+
+        bool success = StreamingHelpers.safeHookCall(recipient, data);
+        emit HookCalled(recipient, streamId, success);
+
+        if (!success) {
+            revert StreamingErrors.HookCallFailed(
+                recipient,
+                "Withdraw hook failed"
+            );
+        }
+    }
+
+    /// @notice Executes cancel hooks for a recipient if it's an allowlisted hook
+    /// @param streamId The ID of the stream
+    /// @param sender The original sender of the stream
+    /// @param senderAmount Amount returned to sender
+    /// @param recipientAmount Amount given to recipient
+    function _executeCancelHook(
+        uint256 streamId,
+        address sender,
+        uint256 senderAmount,
+        uint256 recipientAmount
+    ) internal {
+        Stream storage stream = streams[streamId];
+        address recipient = stream.recipient;
+
+        if (!isAllowlistedHook[recipient]) return;
+
+        bytes memory data = abi.encodeCall(
+            IStreamingRecipient.onStreamingCancel,
+            (streamId, sender, senderAmount, recipientAmount)
+        );
+
+        bool success = StreamingHelpers.safeHookCall(recipient, data);
+        emit HookCalled(recipient, streamId, success);
+
+        if (!success) {
+            revert StreamingErrors.HookCallFailed(
+                recipient,
+                "Cancel hook failed"
+            );
+        }
+    }
+
     // ============ LOGARITHMIC MATH FUNCTIONS ============
-    // ln function and calculateLogStreamedAmount remain unchanged
-    /**
-     * @dev Calculates natural logarithm using Taylor series approximation
-     * @param x Input value (scaled by LOG_PRECISION)
-     * @return Natural logarithm of x (scaled by LOG_PRECISION)
-     */
+    // [Keep your existing ln and calculateLogStreamedAmount functions unchanged]
+
     function ln(uint256 x) internal pure returns (uint256) {
         require(x > 0, "ln: input must be positive");
-
-        if (x == LOG_PRECISION) return 0; // ln(1) = 0
+        if (x == LOG_PRECISION) return 0;
 
         uint256 result = 0;
         uint256 y = x;
 
-        // Handle values greater than 1
         if (y >= LOG_PRECISION) {
             uint256 powerOf2 = 0;
             while (y >= 2 * LOG_PRECISION) {
                 y = y / 2;
                 powerOf2++;
             }
-            result = powerOf2 * 693147180559945309; // ln(2) * LOG_PRECISION
+            result = powerOf2 * 693147180559945309;
         }
 
-        // Taylor series for ln(1 + z) where z = y - 1
         if (y != LOG_PRECISION) {
             uint256 z = y > LOG_PRECISION
                 ? y - LOG_PRECISION
@@ -116,7 +229,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
             uint256 term = z;
             uint256 i = 1;
 
-            // Calculate first 10 terms of Taylor series for reasonable precision
             for (uint256 j = 0; j < 10; j++) {
                 if (y > LOG_PRECISION) {
                     if (i % 2 == 1) {
@@ -134,7 +246,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
                 term = (term * z) / LOG_PRECISION;
                 i++;
 
-                // Prevent overflow
                 if (term < 1000) break;
             }
         }
@@ -142,14 +253,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         return result;
     }
 
-    /**
-     * @dev Calculates the logarithmic streaming amount for a given time
-     * @param totalAmount Total amount to be streamed
-     * @param elapsedTime Time elapsed since stream start
-     * @param totalDuration Total duration of the stream
-     * @param offset Offset to ensure positive domain for logarithm
-     * @return Streamed amount based on logarithmic curve
-     */
     function calculateLogStreamedAmount(
         uint256 totalAmount,
         uint256 elapsedTime,
@@ -159,24 +262,21 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         if (elapsedTime == 0) return 0;
         if (elapsedTime >= totalDuration) return totalAmount;
 
-        // Calculate ln(elapsedTime + offset) and ln(totalDuration + offset)
         uint256 logElapsed = ln(
             ((elapsedTime + offset) * LOG_PRECISION) / (offset + 1)
-        ); // Assuming offset >= 0
+        );
         uint256 logTotal = ln(
             ((totalDuration + offset) * LOG_PRECISION) / (offset + 1)
-        ); // Assuming offset >= 0
+        );
 
-        if (logTotal == 0) return totalAmount; // Prevent division by zero
+        if (logTotal == 0) return totalAmount;
 
         return (totalAmount * logElapsed) / logTotal;
     }
 
     // ============ STREAM CREATION FUNCTIONS ============
+    // [Keep your existing stream creation functions unchanged]
 
-    /**
-     * @dev Creates a linear stream (existing functionality)
-     */
     function createLinearStream(
         address recipient,
         uint256 deposit,
@@ -199,10 +299,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         return _createStream(params);
     }
 
-    /**
-     * @dev Creates a logarithmic stream with custom curve parameters
-     * @param offset Offset for logarithmic function (recommended: duration / 10)
-     */
     function createLogarithmicStream(
         address recipient,
         uint256 deposit,
@@ -229,13 +325,9 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         return _createStream(params);
     }
 
-    /**
-     * @dev Internal function to create streams with different shapes
-     */
     function _createStream(
         CreateStreamParams memory params
     ) internal returns (uint256) {
-        // Changed to accept struct
         require(params.recipient != address(0), "Stream to zero address");
         require(params.recipient != address(this), "Stream to contract");
         require(params.recipient != msg.sender, "Stream to caller");
@@ -252,33 +344,28 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         uint256 duration = params.stopTime - params.startTime;
         require(params.deposit >= duration, "Deposit smaller than time delta");
 
-        // 1) Calculate broker fee and netDeposit
         uint256 brokerFee = (params.deposit * BROKER_FEE_PERCENTAGE) /
             PERCENTAGE_SCALE;
         uint256 netDeposit = params.deposit - brokerFee;
-        require(netDeposit > 0, "Net deposit is zero after fee"); // Added safety check
+        require(netDeposit > 0, "Net deposit is zero after fee");
 
-        // 2) Transfer entire deposit from sender
         IERC20(params.tokenAddress).safeTransferFrom(
             msg.sender,
             address(this),
             params.deposit
         );
 
-        // 3) Transfer broker fee to owner
         if (brokerFee > 0) {
             IERC20(params.tokenAddress).safeTransfer(owner(), brokerFee);
         }
 
-        // 4) Mint a new stream ID
         uint256 streamId = ++_streamIds;
 
-        // 5) Get a storage pointer and assign fields directly
         Stream storage newStream = streams[streamId];
         newStream.sender = msg.sender;
         newStream.recipient = params.recipient;
         newStream.deposit = netDeposit;
-        newStream.tokenAddress = IERC20(params.tokenAddress); // This was the problematic area
+        newStream.tokenAddress = IERC20(params.tokenAddress);
         newStream.startTime = params.startTime;
         newStream.stopTime = params.stopTime;
         newStream.remainingBalance = netDeposit;
@@ -287,9 +374,8 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
             require(
                 duration > 0,
                 "Duration must be positive for linear stream rate calculation"
-            ); // Safety for division
+            );
             newStream.ratePerSecond = netDeposit / duration;
-            
         } else {
             newStream.ratePerSecond = 0;
         }
@@ -300,7 +386,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         newStream.logScale = params.logScale;
         newStream.logOffset = params.logOffset;
 
-        // 7) Mint the NFT to the recipient (params.recipient was recipient of stream)
         _mint(params.recipient, streamId);
 
         emit StreamCreated(
@@ -308,7 +393,7 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
             msg.sender,
             params.recipient,
             netDeposit,
-            params.tokenAddress, // Pass address for event
+            params.tokenAddress,
             params.startTime,
             params.stopTime,
             params.cancelable,
@@ -319,10 +404,8 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
     }
 
     // ============ BALANCE CALCULATION ============
+    // [Keep your existing balanceOf function unchanged]
 
-    /**
-     * @dev Calculates available balance based on stream shape
-     */
     function balanceOf(uint256 streamId) public view returns (uint256) {
         require(_ownerOf(streamId) != address(0), "Stream does not exist");
         Stream storage stream = streams[streamId];
@@ -338,7 +421,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         if (stream.shape == StreamShape.LINEAR) {
             streamedAmount = elapsedTime * stream.ratePerSecond;
         } else {
-            // Ensure logOffset used here matches how it was stored
             streamedAmount = calculateLogStreamedAmount(
                 stream.deposit,
                 elapsedTime,
@@ -358,7 +440,7 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
                 : 0;
     }
 
-    // ============ WITHDRAWAL AND CANCELLATION ============
+    // ============ WITHDRAWAL AND CANCELLATION WITH HOOKS ============
 
     function withdrawFromStream(
         uint256 streamId,
@@ -381,6 +463,9 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
             stream.isActive = false;
         }
 
+        // Execute hook before token transfer
+        _executeWithdrawHook(streamId, msg.sender, stream.recipient, amount);
+
         stream.tokenAddress.safeTransfer(stream.recipient, amount);
 
         emit WithdrawFromStream(streamId, stream.recipient, amount);
@@ -399,11 +484,19 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
             "Caller not authorized"
         );
 
-        uint256 recipientBalance = balanceOf(streamId); // Calculates current claimable by recipient
-        uint256 senderRefund = stream.remainingBalance - recipientBalance; // What's left for sender
+        uint256 recipientBalance = balanceOf(streamId);
+        uint256 senderRefund = stream.remainingBalance - recipientBalance;
 
         stream.isActive = false;
-        stream.remainingBalance = 0; // All funds will be paid out
+        stream.remainingBalance = 0;
+
+        // Execute hook before token transfers
+        _executeCancelHook(
+            streamId,
+            stream.sender,
+            senderRefund,
+            recipientBalance
+        );
 
         if (recipientBalance > 0) {
             stream.tokenAddress.safeTransfer(
@@ -427,6 +520,7 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
     }
 
     // ============ VIEW FUNCTIONS ============
+    // [Keep your existing view functions unchanged]
 
     function getStream(uint256 streamId) external view returns (Stream memory) {
         require(_ownerOf(streamId) != address(0), "Stream does not exist");
@@ -444,10 +538,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         return streams[streamId].shape;
     }
 
-    /**
-     * @dev Gets the percentage of tokens streamed for any stream shape
-     * @return percentage Percentage streamed (scaled by PERCENTAGE_SCALE)
-     */
     function getStreamProgress(
         uint256 streamId
     ) external view returns (uint256 percentage) {
@@ -459,21 +549,17 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         }
 
         if (block.timestamp >= stream.stopTime) {
-            return PERCENTAGE_SCALE; // 100%
+            return PERCENTAGE_SCALE;
         }
 
         uint256 elapsedTime = block.timestamp - stream.startTime;
         uint256 totalDuration = stream.stopTime - stream.startTime;
 
         if (stream.shape == StreamShape.LINEAR) {
-            // Ensure totalDuration is not zero to prevent division by zero.
-            // stopTime > startTime check in _createStream should guarantee this.
-            if (totalDuration == 0) return PERCENTAGE_SCALE; // Or handle as error, though unlikely
+            if (totalDuration == 0) return PERCENTAGE_SCALE;
             percentage = (elapsedTime * PERCENTAGE_SCALE) / totalDuration;
         } else {
-            // Ensure stream.deposit is not zero to prevent division by zero.
-            // netDeposit > 0 check in _createStream should guarantee this.
-            if (stream.deposit == 0) return 0; // Or handle as error
+            if (stream.deposit == 0) return 0;
             uint256 streamedAmount = calculateLogStreamedAmount(
                 stream.deposit,
                 elapsedTime,
@@ -487,9 +573,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
 
     // ============ LEGACY COMPATIBILITY ============
 
-    /**
-     * @dev Backward compatible function - creates linear stream
-     */
     function createStream(
         address recipient,
         uint256 deposit,
@@ -498,7 +581,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         uint256 stopTime,
         bool cancelable
     ) external returns (uint256) {
-        // Calls the refactored createLinearStream which now uses the params struct internally
         return
             createLinearStream(
                 recipient,
