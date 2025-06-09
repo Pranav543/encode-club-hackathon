@@ -32,7 +32,7 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         uint256 logOffset; // Offset to ensure log domain is positive
     }
 
-    // Struct to hold parameters for _createStream, reducing stack load
+    // Struct to hold parameters for _createStream
     struct CreateStreamParams {
         address recipient;
         uint256 deposit;
@@ -250,19 +250,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
         );
 
         uint256 duration = params.stopTime - params.startTime;
-        // Original code: require(deposit >= duration, "Deposit smaller than time delta");
-        // This check might be too strict if deposit is a token amount and duration is in seconds.
-        // For example, 1000 tokens for 3600 seconds. 1000 < 3600.
-        // Assuming ratePerSecond calculation implies deposit should be divisible by duration for linear streams,
-        // and that `deposit` means total tokens, not tokens per second.
-        // If ratePerSecond is expected to be >= 1, then netDeposit / duration must be >= 1.
-        // The original check `deposit >= duration` might be intended to ensure ratePerSecond is at least 1 (if token has 0 decimals).
-        // Let's assume the original intent for `deposit >= duration` was to simplify rate calculation or ensure a minimum stream value per second.
-        // If `netDeposit / duration` can be 0 (e.g. 100 tokens over 200 seconds = 0.5 tokens/sec, which is 0 in integer math),
-        // this needs careful handling. The original code: `temp.ratePerSecond = (shape == StreamShape.LINEAR) ? (netDeposit / duration) : 0;`
-        // This division will truncate. For a rate-based stream, it's crucial.
-        // The original require `deposit >= duration` prevents `netDeposit / duration` from being zero if `netDeposit` is similar to `deposit`.
-        // Let's keep this require as it was in the original logic:
         require(params.deposit >= duration, "Deposit smaller than time delta");
 
         // 1) Calculate broker fee and netDeposit
@@ -302,13 +289,7 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
                 "Duration must be positive for linear stream rate calculation"
             ); // Safety for division
             newStream.ratePerSecond = netDeposit / duration;
-            // Original check `deposit >= duration` and `netDeposit > 0` should ensure ratePerSecond > 0
-            // if deposit is significantly larger than duration and fee is small.
-            // If netDeposit < duration, ratePerSecond will be 0. This needs to be an acceptable outcome or guarded against.
-            // Given original `deposit >= duration`, `netDeposit` will also likely be >= `duration` (unless fee is huge),
-            // or at least `netDeposit / duration` would be non-zero if `netDeposit >= duration`.
-            // If `netDeposit < duration` is possible and problematic (rate 0), add:
-            // require(newStream.ratePerSecond > 0, "Rate per second is zero");
+            
         } else {
             newStream.ratePerSecond = 0;
         }
@@ -338,10 +319,6 @@ contract StreamingContract is ERC721, ReentrancyGuard, Ownable {
     }
 
     // ============ BALANCE CALCULATION ============
-    // balanceOf, withdrawFromStream, cancelStream, getStream, getTotalStreams, getStreamShape, getStreamProgress, createStream (legacy)
-    // remain unchanged from the original paste.txt.
-    // These functions are assumed to be correct as they were not the source of the "Stack too deep" error.
-    // (The following are copied from the provided code for completeness of the contract structure, but unchanged)
 
     /**
      * @dev Calculates available balance based on stream shape
