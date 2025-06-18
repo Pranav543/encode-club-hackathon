@@ -20,6 +20,7 @@ contract NetworkSLAWithStreamRecreation {
         uint256 totalPaid;
         uint256 currentStreamId;
         uint256 streamRecreationCount;
+        uint256 creationMetricId; // Track performance data at SLA creation
         uint256 lastCheckedMetricId; // Track last checked data point
     }
     
@@ -41,14 +42,14 @@ contract NetworkSLAWithStreamRecreation {
     
     PerformanceDataGenerator public performanceContract;
     
-    event SLACreated(uint256 indexed slaId, address indexed serviceProvider, address indexed customer, uint256 basePaymentRate);
+    event SLACreated(uint256 indexed slaId, address indexed serviceProvider, address indexed customer, uint256 basePaymentRate, uint256 creationMetricId);
     event StreamCreated(uint256 indexed streamId, uint256 indexed slaId, address indexed to, uint256 paymentRate);
-    event ViolationDetected(uint256 indexed slaId, string violationType, uint256 actualValue, uint256 threshold, uint256 violationCount);
+    event ViolationDetected(uint256 indexed slaId, uint256 metricId, string violationType, uint256 actualValue, uint256 threshold, uint256 violationCount);
     event PaymentRateAdjusted(uint256 indexed slaId, uint256 oldRate, uint256 newRate, string reason);
     event StreamCancelled(uint256 indexed streamId, uint256 indexed slaId, string reason, uint256 finalViolationCount);
     event StreamRecreated(uint256 indexed newStreamId, uint256 indexed slaId, uint256 newPaymentRate, string reason);
     event SLATerminated(uint256 indexed slaId, string reason, uint256 totalViolations);
-    event ComplianceChecked(uint256 indexed slaId, uint256 metricId, bool violationFound, string dataType);
+    event ComplianceChecked(uint256 indexed slaId, uint256 fromMetricId, uint256 toMetricId, uint256 violationsFound);
     
     constructor(address _performanceContract) {
         performanceContract = PerformanceDataGenerator(_performanceContract);
@@ -72,6 +73,9 @@ contract NetworkSLAWithStreamRecreation {
         slaCounter++;
         streamCounter++;
         
+        // Capture current metric count at SLA creation time
+        uint256 currentMetricCount = performanceContract.getTotalMetricsCount();
+        
         slas[slaCounter] = SLA({
             serviceProvider: _serviceProvider,
             customer: msg.sender,
@@ -88,7 +92,8 @@ contract NetworkSLAWithStreamRecreation {
             totalPaid: 0,
             currentStreamId: streamCounter,
             streamRecreationCount: 0,
-            lastCheckedMetricId: 0 // Initialize to 0
+            creationMetricId: currentMetricCount, // Only check data after this point
+            lastCheckedMetricId: currentMetricCount // Initialize to creation point
         });
         
         // Create initial payment stream
@@ -103,7 +108,7 @@ contract NetworkSLAWithStreamRecreation {
             slaId: slaCounter
         });
         
-        emit SLACreated(slaCounter, _serviceProvider, msg.sender, _basePaymentRate);
+        emit SLACreated(slaCounter, _serviceProvider, msg.sender, _basePaymentRate, currentMetricCount);
         emit StreamCreated(streamCounter, slaCounter, _serviceProvider, _basePaymentRate);
     }
     
@@ -114,16 +119,24 @@ contract NetworkSLAWithStreamRecreation {
         
         // Get current metric count from performance contract
         uint256 currentMetricCount = performanceContract.getTotalMetricsCount();
-        require(currentMetricCount > 0, "No performance data available");
         
         // Check if there's new data to process since last check
-        require(currentMetricCount > sla.lastCheckedMetricId, "No new performance data to check");
+        // Only process data generated AFTER this SLA was created
+        uint256 startCheckingFrom = sla.lastCheckedMetricId + 1;
+        uint256 endCheckingAt = currentMetricCount;
+        
+        // Ensure we don't check data from before SLA creation
+        if (startCheckingFrom <= sla.creationMetricId) {
+            startCheckingFrom = sla.creationMetricId + 1;
+        }
+        
+        require(endCheckingAt >= startCheckingFrom, "No new performance data to check for this SLA");
         
         // Process all new metrics since last check
         bool violationOccurred = false;
         uint256 newViolations = 0;
         
-        for (uint256 metricId = sla.lastCheckedMetricId + 1; metricId <= currentMetricCount; metricId++) {
+        for (uint256 metricId = startCheckingFrom; metricId <= endCheckingAt; metricId++) {
             // Get specific performance metric
             PerformanceDataGenerator.PerformanceMetric memory metric = performanceContract.getPerformanceMetric(metricId);
             
@@ -135,28 +148,26 @@ contract NetworkSLAWithStreamRecreation {
                 if (metric.latency > sla.maxLatency) {
                     newViolations++;
                     currentViolation = true;
-                    emit ViolationDetected(_slaId, "Latency", metric.latency, sla.maxLatency, sla.violationCount + newViolations);
+                    emit ViolationDetected(_slaId, metricId, "Latency", metric.latency, sla.maxLatency, sla.violationCount + newViolations);
                 }
                 
                 // Check bandwidth violation
                 if (metric.bandwidth < sla.guaranteedBandwidth) {
                     newViolations++;
                     currentViolation = true;
-                    emit ViolationDetected(_slaId, "Bandwidth", metric.bandwidth, sla.guaranteedBandwidth, sla.violationCount + newViolations);
+                    emit ViolationDetected(_slaId, metricId, "Bandwidth", metric.bandwidth, sla.guaranteedBandwidth, sla.violationCount + newViolations);
                 }
                 
                 if (currentViolation) {
                     violationOccurred = true;
                 }
             }
-            
-            emit ComplianceChecked(_slaId, metricId, 
-                keccak256(abi.encodePacked(metric.dataType)) == keccak256(abi.encodePacked("violation")), 
-                metric.dataType);
         }
         
         // Update last checked metric ID
         sla.lastCheckedMetricId = currentMetricCount;
+        
+        emit ComplianceChecked(_slaId, startCheckingFrom, endCheckingAt, newViolations);
         
         // Apply penalties only if violations occurred
         if (violationOccurred && newViolations > 0) {
@@ -183,7 +194,7 @@ contract NetworkSLAWithStreamRecreation {
                 // Create new stream with penalty rate (if payment rate > 0)
                 if (sla.currentPaymentRate > 0) {
                     streamCounter++;
-                    sla.currentStreamId = streamCounter;
+                    sla.currentStreamId = streamCounter; // Update stream ID in SLA
                     sla.streamRecreationCount++;
                     sla.violationCount = 0; // Reset violation count for new stream
                     
