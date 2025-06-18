@@ -50,6 +50,9 @@ export const TransactionLogger = () => {
         details.push(
           `Rate: ${event.args?.[3]?.toString() || "N/A"} tokens/sec`
         );
+        details.push(
+          `Created at Metric: #${event.args?.[4]?.toString() || "N/A"}`
+        );
         break;
       case "StreamCreated":
         details.push(`Stream ID: ${event.args?.[0]?.toString() || "N/A"}`);
@@ -60,10 +63,13 @@ export const TransactionLogger = () => {
         break;
       case "ViolationDetected":
         details.push(`SLA ID: ${event.args?.[0]?.toString() || "N/A"}`);
-        details.push(`Type: ${event.args?.[1] || "N/A"}`);
-        details.push(`Value: ${event.args?.[2]?.toString() || "N/A"}`);
-        details.push(`Threshold: ${event.args?.[3]?.toString() || "N/A"}`);
-        details.push(`Violations: ${event.args?.[4]?.toString() || "N/A"}`);
+        details.push(`Metric ID: #${event.args?.[1]?.toString() || "N/A"}`);
+        details.push(`Type: ${event.args?.[2] || "N/A"}`);
+        details.push(`Value: ${event.args?.[3]?.toString() || "N/A"}`);
+        details.push(`Threshold: ${event.args?.[4]?.toString() || "N/A"}`);
+        details.push(
+          `Total Violations: ${event.args?.[5]?.toString() || "N/A"}`
+        );
         break;
       case "PaymentRateAdjusted":
         details.push(`SLA ID: ${event.args?.[0]?.toString() || "N/A"}`);
@@ -86,11 +92,7 @@ export const TransactionLogger = () => {
           `Total Violations: ${event.args?.[2]?.toString() || "N/A"}`
         );
         break;
-      case "PerformanceUpdated":
-        details.push(`Metric ID: ${event.args?.[0]?.toString() || "N/A"}`);
-        details.push(`Latency: ${event.args?.[1]?.toString() || "N/A"}ms`);
-        details.push(`Bandwidth: ${event.args?.[2]?.toString() || "N/A"} Mbps`);
-        break;
+
       case "StreamRecreated":
         details.push(`New Stream ID: ${event.args?.[0]?.toString() || "N/A"}`);
         details.push(`SLA ID: ${event.args?.[1]?.toString() || "N/A"}`);
@@ -107,9 +109,14 @@ export const TransactionLogger = () => {
         break;
       case "ComplianceChecked":
         details.push(`SLA ID: ${event.args?.[0]?.toString() || "N/A"}`);
-        details.push(`Metric ID: ${event.args?.[1]?.toString() || "N/A"}`);
-        details.push(`Violation Found: ${event.args?.[2] ? "Yes" : "No"}`);
-        details.push(`Data Type: ${event.args?.[3] || "N/A"}`);
+        details.push(
+          `Checked Metrics: #${event.args?.[1]?.toString() || "N/A"} to #${
+            event.args?.[2]?.toString() || "N/A"
+          }`
+        );
+        details.push(
+          `Violations Found: ${event.args?.[3]?.toString() || "N/A"}`
+        );
         break;
     }
 

@@ -27,11 +27,14 @@ interface SLAData {
   totalPaid: number;
   streamId: number;
   streamRecreationCount: number;
+  creationMetricId: number;
+  lastCheckedMetricId: number;
 }
 
 export const SLADashboard = () => {
   const [slaData, setSlaData] = useState<SLAData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0); // Force refresh trigger
   const { isConnected, chainId } = useWallet();
   
   const isOnCorrectNetwork = chainId === 31337;
@@ -69,7 +72,9 @@ export const SLADashboard = () => {
           isActive: Boolean(sla.isActive),
           totalPaid: Number(sla.totalPaid) || 0,
           streamId: Number(sla.currentStreamId) || 0,
-          streamRecreationCount: Number(sla.streamRecreationCount) || 0
+          streamRecreationCount: Number(sla.streamRecreationCount) || 0,
+          creationMetricId: Number(sla.creationMetricId) || 0,
+          lastCheckedMetricId: Number(sla.lastCheckedMetricId) || 0
         });
       }
     } catch (error) {
@@ -79,11 +84,48 @@ export const SLADashboard = () => {
     }
   };
 
+  // Listen for blockchain events to trigger refresh
+  useEffect(() => {
+    if (!canInteract) return;
+
+    const contract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_NETWORK_SLA_ADDRESS!,
+      NetworkSLAWithStreamRecreationABI,
+      provider
+    );
+
+    const handleStreamRecreated = () => {
+      console.log('Stream recreated event detected, refreshing dashboard...');
+      setRefreshKey(prev => prev + 1); // Trigger refresh
+    };
+
+    const handlePaymentRateAdjusted = () => {
+      console.log('Payment rate adjusted event detected, refreshing dashboard...');
+      setRefreshKey(prev => prev + 1); // Trigger refresh
+    };
+
+    const handleStreamCancelled = () => {
+      console.log('Stream cancelled event detected, refreshing dashboard...');
+      setRefreshKey(prev => prev + 1); // Trigger refresh
+    };
+
+    contract.on('StreamRecreated', handleStreamRecreated);
+    contract.on('PaymentRateAdjusted', handlePaymentRateAdjusted);
+    contract.on('StreamCancelled', handleStreamCancelled);
+
+    return () => {
+      contract.removeAllListeners();
+    };
+  }, [canInteract]);
+
+  // Fetch data when component mounts or refresh is triggered
   useEffect(() => {
     fetchLatestSLA();
-    
-    // Set up periodic refresh
-    const interval = setInterval(fetchLatestSLA, 5000);
+  }, [canInteract, refreshKey]);
+
+  // Auto-refresh every 3 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchLatestSLA, 3000);
     return () => clearInterval(interval);
   }, [canInteract]);
 
@@ -143,7 +185,7 @@ export const SLADashboard = () => {
               SLA Status (ID: {String(slaData.slaId)})
             </div>
             <Button
-              onClick={fetchLatestSLA}
+              onClick={() => setRefreshKey(prev => prev + 1)}
               variant="outline"
               size="sm"
               disabled={isLoading}
@@ -175,8 +217,8 @@ export const SLADashboard = () => {
                 </div>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm font-medium">Stream ID:</span>
-                <span className="font-mono text-sm">{String(slaData.streamId)}</span>
+                <span className="text-sm font-medium">Current Stream:</span>
+                <span className="font-mono text-sm">#{String(slaData.streamId)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm font-medium">Recreations:</span>
@@ -213,25 +255,40 @@ export const SLADashboard = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">SLA Thresholds</CardTitle>
+          <CardTitle className="text-sm">SLA Thresholds & Tracking</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <div className="flex justify-between">
-              <span>Max Latency:</span>
-              <span className="font-mono">{String(slaData.maxLatency)}ms</span>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Max Latency:</span>
+                <span className="font-mono">{String(slaData.maxLatency)}ms</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Min Bandwidth:</span>
+                <span className="font-mono">{String(slaData.guaranteedBandwidth)} Mbps</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Penalty Rate:</span>
+                <span className="font-mono">{String(slaData.penaltyRate)}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Max Violations:</span>
+                <span className="font-mono">{String(slaData.maxViolations)}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>Min Bandwidth:</span>
-              <span className="font-mono">{String(slaData.guaranteedBandwidth)} Mbps</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Penalty Rate:</span>
-              <span className="font-mono">{String(slaData.penaltyRate)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Max Violations:</span>
-              <span className="font-mono">{String(slaData.maxViolations)}</span>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Created at Metric:</span>
+                <span className="font-mono">#{String(slaData.creationMetricId)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Last Checked:</span>
+                <span className="font-mono">#{String(slaData.lastCheckedMetricId)}</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-2">
+                Only checks data generated after creation
+              </div>
             </div>
           </div>
         </CardContent>
