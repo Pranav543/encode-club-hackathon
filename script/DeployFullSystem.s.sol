@@ -9,7 +9,7 @@ contract DeployFullSystemScript is Script {
     function run() external {
         vm.startBroadcast();
         
-        // Deploy performance data generator with violation-prone ranges
+        // Deploy performance data generator with controlled data functions
         PerformanceDataGenerator performanceContract = new PerformanceDataGenerator();
         console.log("PerformanceDataGenerator deployed to:", address(performanceContract));
         
@@ -17,9 +17,12 @@ contract DeployFullSystemScript is Script {
         NetworkSLAWithStreamRecreation slaContract = new NetworkSLAWithStreamRecreation(address(performanceContract));
         console.log("NetworkSLAWithStreamRecreation deployed to:", address(slaContract));
         
-        // Generate initial performance data
-        for (uint i = 0; i < 5; i++) {
-            performanceContract.generatePerformanceData();
+        // Generate initial performance data using new function names
+        for (uint i = 0; i < 3; i++) {
+            performanceContract.generateGoodPerformanceData();
+        }
+        for (uint i = 0; i < 2; i++) {
+            performanceContract.generateViolationPerformanceData();
         }
         console.log("Generated initial performance data");
         

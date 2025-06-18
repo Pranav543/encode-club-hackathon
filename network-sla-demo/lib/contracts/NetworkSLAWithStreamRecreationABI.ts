@@ -150,5 +150,16 @@ export const NetworkSLAWithStreamRecreationABI = [
     ],
     "name": "StreamRecreated",
     "type": "event"
-  }
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "slaId", "type": "uint256" },
+      { "indexed": false, "name": "metricId", "type": "uint256" },
+      { "indexed": false, "name": "violationFound", "type": "bool" },
+      { "indexed": false, "name": "dataType", "type": "string" }
+    ],
+    "name": "ComplianceChecked",
+    "type": "event"
+  },
 ] as const;

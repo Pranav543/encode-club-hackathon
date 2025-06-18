@@ -7,6 +7,7 @@ interface PerformanceData {
   latency: number;
   bandwidth: number;
   blockNumber: number;
+  dataType: string;
 }
 
 export const useBlockchainPerformanceData = (performanceContractAddress: string) => {
@@ -14,11 +15,13 @@ export const useBlockchainPerformanceData = (performanceContractAddress: string)
   const [isLoading, setIsLoading] = useState(true);
 
   const performanceABI = [
-    "function generatePerformanceData() external",
-    "function getLatestPerformance() external view returns (tuple(uint256 timestamp, uint256 latency, uint256 bandwidth, uint256 blockNumber))",
-    "function getPerformanceHistory(uint256 count) external view returns (tuple(uint256 timestamp, uint256 latency, uint256 bandwidth, uint256 blockNumber)[])",
+    "function generateGoodPerformanceData() external",
+    "function generateViolationPerformanceData() external",
+    "function getLatestPerformance() external view returns (tuple(uint256 timestamp, uint256 latency, uint256 bandwidth, uint256 blockNumber, string dataType))",
+    "function getPerformanceHistory(uint256 count) external view returns (tuple(uint256 timestamp, uint256 latency, uint256 bandwidth, uint256 blockNumber, string dataType)[])",
     "function currentMetricId() external view returns (uint256)",
-    "event PerformanceUpdated(uint256 indexed metricId, uint256 latency, uint256 bandwidth, uint256 timestamp)"
+    "function getTotalMetricsCount() external view returns (uint256)",
+    "event PerformanceUpdated(uint256 indexed metricId, uint256 latency, uint256 bandwidth, uint256 timestamp, string dataType)"
   ];
 
   useEffect(() => {
@@ -28,8 +31,8 @@ export const useBlockchainPerformanceData = (performanceContractAddress: string)
 
     const fetchInitialData = async () => {
       try {
-        const currentId = await contract.currentMetricId();
-        const count = Math.min(Number(currentId), 20); // Get last 20 data points
+        const totalCount = await contract.getTotalMetricsCount();
+        const count = Math.min(Number(totalCount), 20); // Get last 20 data points
         
         if (count > 0) {
           const history = await contract.getPerformanceHistory(count);
@@ -37,7 +40,8 @@ export const useBlockchainPerformanceData = (performanceContractAddress: string)
             timestamp: Number(item.timestamp),
             latency: Number(item.latency),
             bandwidth: Number(item.bandwidth),
-            blockNumber: Number(item.blockNumber)
+            blockNumber: Number(item.blockNumber),
+            dataType: item.dataType || 'unknown'
           }));
           setPerformanceData(formattedData.reverse()); // Show chronological order
         }
@@ -48,17 +52,29 @@ export const useBlockchainPerformanceData = (performanceContractAddress: string)
       }
     };
 
-    // Listen for new performance updates
-    const handlePerformanceUpdate = async (metricId: any, latency: any, bandwidth: any, timestamp: any) => {
-      const blockNumber = await provider.getBlockNumber();
-      const newData = {
-        timestamp: Number(timestamp),
-        latency: Number(latency),
-        bandwidth: Number(bandwidth),
-        blockNumber
-      };
-      
-      setPerformanceData(prev => [...prev.slice(-19), newData]); // Keep last 20 points
+    // Listen for new performance updates with updated event signature
+    const handlePerformanceUpdate = async (
+      metricId: any, 
+      latency: any, 
+      bandwidth: any, 
+      timestamp: any, 
+      dataType: any
+    ) => {
+      try {
+        const blockNumber = await provider.getBlockNumber();
+        const newData = {
+          timestamp: Number(timestamp),
+          latency: Number(latency),
+          bandwidth: Number(bandwidth),
+          blockNumber,
+          dataType: dataType || 'unknown'
+        };
+        
+        console.log('New performance data received:', newData);
+        setPerformanceData(prev => [...prev.slice(-19), newData]); // Keep last 20 points
+      } catch (error) {
+        console.error('Error handling performance update:', error);
+      }
     };
 
     contract.on('PerformanceUpdated', handlePerformanceUpdate);

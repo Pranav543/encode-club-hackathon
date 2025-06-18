@@ -20,6 +20,7 @@ contract NetworkSLAWithStreamRecreation {
         uint256 totalPaid;
         uint256 currentStreamId;
         uint256 streamRecreationCount;
+        uint256 lastCheckedMetricId; // Track last checked data point
     }
     
     struct Stream {
@@ -47,6 +48,7 @@ contract NetworkSLAWithStreamRecreation {
     event StreamCancelled(uint256 indexed streamId, uint256 indexed slaId, string reason, uint256 finalViolationCount);
     event StreamRecreated(uint256 indexed newStreamId, uint256 indexed slaId, uint256 newPaymentRate, string reason);
     event SLATerminated(uint256 indexed slaId, string reason, uint256 totalViolations);
+    event ComplianceChecked(uint256 indexed slaId, uint256 metricId, bool violationFound, string dataType);
     
     constructor(address _performanceContract) {
         performanceContract = PerformanceDataGenerator(_performanceContract);
@@ -85,7 +87,8 @@ contract NetworkSLAWithStreamRecreation {
             isActive: true,
             totalPaid: 0,
             currentStreamId: streamCounter,
-            streamRecreationCount: 0
+            streamRecreationCount: 0,
+            lastCheckedMetricId: 0 // Initialize to 0
         });
         
         // Create initial payment stream
@@ -109,33 +112,65 @@ contract NetworkSLAWithStreamRecreation {
         SLA storage sla = slas[_slaId];
         require(sla.isActive, "SLA is not active");
         
-        // Get latest performance data from blockchain
-        PerformanceDataGenerator.PerformanceMetric memory latest = performanceContract.getLatestPerformance();
-        require(latest.timestamp > 0, "No performance data available");
+        // Get current metric count from performance contract
+        uint256 currentMetricCount = performanceContract.getTotalMetricsCount();
+        require(currentMetricCount > 0, "No performance data available");
         
+        // Check if there's new data to process since last check
+        require(currentMetricCount > sla.lastCheckedMetricId, "No new performance data to check");
+        
+        // Process all new metrics since last check
         bool violationOccurred = false;
+        uint256 newViolations = 0;
         
-        // Check latency violation
-        if (latest.latency > sla.maxLatency) {
-            sla.violationCount++;
-            violationOccurred = true;
-            emit ViolationDetected(_slaId, "Latency", latest.latency, sla.maxLatency, sla.violationCount);
-        }
-        
-        // Check bandwidth violation
-        if (latest.bandwidth < sla.guaranteedBandwidth) {
-            sla.violationCount++;
-            violationOccurred = true;
-            emit ViolationDetected(_slaId, "Bandwidth", latest.bandwidth, sla.guaranteedBandwidth, sla.violationCount);
-        }
-        
-        // Handle violations
-        if (violationOccurred) {
-            // Apply penalty - reduce payment rate
-            uint256 oldRate = sla.currentPaymentRate;
-            sla.currentPaymentRate = sla.currentPaymentRate * (100 - sla.penaltyRate) / 100;
+        for (uint256 metricId = sla.lastCheckedMetricId + 1; metricId <= currentMetricCount; metricId++) {
+            // Get specific performance metric
+            PerformanceDataGenerator.PerformanceMetric memory metric = performanceContract.getPerformanceMetric(metricId);
             
-            emit PaymentRateAdjusted(_slaId, oldRate, sla.currentPaymentRate, "Violation penalty applied");
+            // Only process violation data points for compliance checking
+            if (keccak256(abi.encodePacked(metric.dataType)) == keccak256(abi.encodePacked("violation"))) {
+                bool currentViolation = false;
+                
+                // Check latency violation
+                if (metric.latency > sla.maxLatency) {
+                    newViolations++;
+                    currentViolation = true;
+                    emit ViolationDetected(_slaId, "Latency", metric.latency, sla.maxLatency, sla.violationCount + newViolations);
+                }
+                
+                // Check bandwidth violation
+                if (metric.bandwidth < sla.guaranteedBandwidth) {
+                    newViolations++;
+                    currentViolation = true;
+                    emit ViolationDetected(_slaId, "Bandwidth", metric.bandwidth, sla.guaranteedBandwidth, sla.violationCount + newViolations);
+                }
+                
+                if (currentViolation) {
+                    violationOccurred = true;
+                }
+            }
+            
+            emit ComplianceChecked(_slaId, metricId, 
+                keccak256(abi.encodePacked(metric.dataType)) == keccak256(abi.encodePacked("violation")), 
+                metric.dataType);
+        }
+        
+        // Update last checked metric ID
+        sla.lastCheckedMetricId = currentMetricCount;
+        
+        // Apply penalties only if violations occurred
+        if (violationOccurred && newViolations > 0) {
+            // Update violation count
+            sla.violationCount += newViolations;
+            
+            // Apply penalty for each violation
+            uint256 oldRate = sla.currentPaymentRate;
+            for (uint256 i = 0; i < newViolations; i++) {
+                sla.currentPaymentRate = sla.currentPaymentRate * (100 - sla.penaltyRate) / 100;
+            }
+            
+            emit PaymentRateAdjusted(_slaId, oldRate, sla.currentPaymentRate, 
+                string(abi.encodePacked("Applied ", uintToString(newViolations), " violation penalties")));
             
             // Check if max violations reached
             if (sla.violationCount >= sla.maxViolations) {
@@ -157,7 +192,7 @@ contract NetworkSLAWithStreamRecreation {
                         to: sla.serviceProvider,
                         paymentRate: sla.currentPaymentRate,
                         startTime: block.timestamp,
-                        totalAmount: sla.currentPaymentRate * (sla.duration / 2), // Reduced duration for new stream
+                        totalAmount: sla.currentPaymentRate * (sla.duration / 2),
                         amountPaid: 0,
                         isActive: true,
                         slaId: _slaId
@@ -177,17 +212,24 @@ contract NetworkSLAWithStreamRecreation {
         }
     }
     
-    // Automatic compliance checking
-    function checkAllActiveSLAs() external {
-        for (uint256 i = 1; i <= slaCounter; i++) {
-            if (slas[i].isActive) {
-                try this.checkSLACompliance(i) {
-                    // Compliance check succeeded
-                } catch {
-                    // Compliance check failed, continue to next SLA
-                }
-            }
+    // Utility function to convert uint to string
+    function uintToString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
         }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
     }
     
     function getSLA(uint256 _slaId) external view returns (SLA memory) {

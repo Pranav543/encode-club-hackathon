@@ -31,6 +31,10 @@ export const TransactionLogger = () => {
         return "bg-cyan-500";
       case "StreamRecreated":
         return "bg-indigo-500";
+      case "PerformanceUpdated":
+        return "bg-cyan-500";
+      case "ComplianceChecked":
+        return "bg-blue-500";
       default:
         return "bg-gray-500";
     }
@@ -94,6 +98,18 @@ export const TransactionLogger = () => {
           `New Rate: ${event.args?.[2]?.toString() || "N/A"} tokens/sec`
         );
         details.push(`Reason: ${event.args?.[3] || "N/A"}`);
+        break;
+      case "PerformanceUpdated":
+        details.push(`Metric ID: ${event.args?.[0]?.toString() || "N/A"}`);
+        details.push(`Latency: ${event.args?.[1]?.toString() || "N/A"}ms`);
+        details.push(`Bandwidth: ${event.args?.[2]?.toString() || "N/A"} Mbps`);
+        details.push(`Type: ${event.args?.[4] || "N/A"}`);
+        break;
+      case "ComplianceChecked":
+        details.push(`SLA ID: ${event.args?.[0]?.toString() || "N/A"}`);
+        details.push(`Metric ID: ${event.args?.[1]?.toString() || "N/A"}`);
+        details.push(`Violation Found: ${event.args?.[2] ? "Yes" : "No"}`);
+        details.push(`Data Type: ${event.args?.[3] || "N/A"}`);
         break;
     }
 
