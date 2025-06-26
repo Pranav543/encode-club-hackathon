@@ -8,14 +8,17 @@ import { DataGenerator } from '@/components/DataGenerator';
 import { ComplianceChecker } from '@/components/ComplianceChecker';
 import { WalletConnector } from '@/components/WalletConnector';
 import { NetworkGuard } from '@/components/NetworkGuard';
+import { ProviderWithdrawal } from '@/components/ProviderWithdrawal';
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { provider } from '@/lib/blockchain';
 import { NetworkSLAWithStreamRecreationABI } from '@/lib/contracts/NetworkSLAWithStreamRecreationABI';
+import { useWallet } from '@/hooks/useWallet';
 
 export default function HomePage() {
   const [currentSlaId, setCurrentSlaId] = useState<number | null>(null);
   const [isCurrentSlaActive, setIsCurrentSlaActive] = useState(false);
+  const { accountIndex } = useWallet();
 
   useEffect(() => {
     const fetchCurrentSLA = async () => {
@@ -48,20 +51,41 @@ export default function HomePage() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-2">Network SLA Blockchain Demo</h1>
           <p className="text-muted-foreground">
-            Controlled demonstration of decentralized network SLAs with precise violation testing
+            Controlled demonstration between Customer and Service Provider using Anvil accounts
           </p>
         </div>
 
-        {/* Wallet Connection Section */}
-        <div className="max-w-md mx-auto mb-6">
+        {/* Demo Account Connection */}
+        <div className="max-w-2xl mx-auto mb-6">
           <WalletConnector />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="space-y-6">
-            <CreateSLA />
-            <DataGenerator />
-            <ComplianceChecker slaId={currentSlaId} isActive={isCurrentSlaActive} />
+            {/* Show different components based on account type */}
+            {accountIndex === 0 && (
+              <>
+                <CreateSLA />
+                <DataGenerator />
+                <ComplianceChecker slaId={currentSlaId} isActive={isCurrentSlaActive} />
+              </>
+            )}
+            
+            {accountIndex === 1 && (
+              <>
+                <ProviderWithdrawal />
+                <DataGenerator />
+                <ComplianceChecker slaId={currentSlaId} isActive={isCurrentSlaActive} />
+              </>
+            )}
+
+            {accountIndex === null && (
+              <>
+                <CreateSLA />
+                <DataGenerator />
+                <ComplianceChecker slaId={currentSlaId} isActive={isCurrentSlaActive} />
+              </>
+            )}
           </div>
           
           <div className="space-y-6">

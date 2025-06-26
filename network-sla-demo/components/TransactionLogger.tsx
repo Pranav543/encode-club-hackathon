@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { NetworkSLAWithStreamRecreationABI } from "@/lib/contracts/NetworkSLAWithStreamRecreationABI";
 import { ExternalLink } from "lucide-react";
+import { ethers } from "ethers";
 
 export const TransactionLogger = () => {
   const { events, isListening } = useContractEvents(
@@ -35,6 +36,10 @@ export const TransactionLogger = () => {
         return "bg-cyan-500";
       case "ComplianceChecked":
         return "bg-blue-500";
+      case "WithdrawalExecuted":
+        return "bg-green-600";
+      case "StreamBalanceUpdated":
+        return "bg-teal-500";
       default:
         return "bg-gray-500";
     }
@@ -48,7 +53,11 @@ export const TransactionLogger = () => {
         details.push(`SLA ID: ${event.args?.[0]?.toString() || "N/A"}`);
         details.push(`Provider: ${event.args?.[1]?.slice(0, 8) || "N/A"}...`);
         details.push(
-          `Rate: ${event.args?.[3]?.toString() || "N/A"} tokens/sec`
+          `Rate: ${event.args?.[3]?.toString() || "N/A"} tokens/sec (≈$${(
+            Number(event.args?.[3] || 0) *
+            0.001 *
+            3400
+          ).toFixed(2)}/sec)`
         );
         details.push(
           `Created at Metric: #${event.args?.[4]?.toString() || "N/A"}`
@@ -116,6 +125,19 @@ export const TransactionLogger = () => {
         );
         details.push(
           `Violations Found: ${event.args?.[3]?.toString() || "N/A"}`
+        );
+        break;
+      // Add to the formatEventDetails function:
+      case "WithdrawalExecuted":
+        details.push(`Stream ID: ${event.args?.[0]?.toString() || "N/A"}`);
+        details.push(`Provider: ${event.args?.[1]?.slice(0, 8) || "N/A"}...`);
+        details.push(`Amount: ${ethers.formatEther(event.args?.[2] || 0)} ETH`);
+        break;
+
+      case "StreamBalanceUpdated":
+        details.push(`Stream ID: ${event.args?.[0]?.toString() || "N/A"}`);
+        details.push(
+          `New Balance: ${ethers.formatEther(event.args?.[1] || 0)} ETH`
         );
         break;
     }

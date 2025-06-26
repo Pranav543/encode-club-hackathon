@@ -25,73 +25,109 @@ export const ComplianceChecker = ({ slaId, isActive }: ComplianceCheckerProps) =
   const canCheck = isConnected && isOnCorrectNetwork && slaId && isActive;
 
   const checkCompliance = async () => {
-    if (!canCheck) return;
+  if (!canCheck) return;
+  
+  setIsChecking(true);
+  try {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
     
-    setIsChecking(true);
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      const contract = new ethers.Contract(
-        process.env.NEXT_PUBLIC_NETWORK_SLA_ADDRESS!,
-        NetworkSLAWithStreamRecreationABI,
-        signer
-      );
+    const contract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_NETWORK_SLA_ADDRESS!,
+      NetworkSLAWithStreamRecreationABI,
+      signer
+    );
 
-      const tx = await contract.checkSLACompliance(slaId);
-      
-      toast.loading(
-        "Compliance Check Started",
-        {id: tx.hash}
-      );
+    console.log('🔍 Starting compliance check for SLA:', slaId);
+    
+    // Get SLA info before checking
+    const sla = await contract.getSLA(slaId);
+    console.log('📋 SLA Info before compliance check:', {
+      violationCount: Number(sla.violationCount),
+      basePaymentRate: Number(sla.basePaymentRate),
+      currentPaymentRate: Number(sla.currentPaymentRate),
+      penaltyRate: Number(sla.penaltyRate),
+      creationMetricId: Number(sla.creationMetricId),
+      lastCheckedMetricId: Number(sla.lastCheckedMetricId)
+    });
 
-      const receipt = await tx.wait();
-      
-      // Analyze events to determine what happened
-      const events = receipt.logs;
-      let resultMessage = "No new violations found";
-      let violationCount = 0;
-      
-      events.forEach((log: any) => {
-        try {
-          const parsed = contract.interface.parseLog(log);
-          if (parsed?.name === 'ViolationDetected') {
-            violationCount++;
-          } else if (parsed?.name === 'PaymentRateAdjusted') {
-            resultMessage = `${violationCount} violation(s) detected, penalties applied`;
-          } else if (parsed?.name === 'StreamCancelled') {
-            resultMessage = `Stream cancelled due to max violations`;
+    const tx = await contract.checkSLACompliance(slaId);
+    
+    toast.loading("Compliance Check Started", {
+      id: tx.hash,
+      description: `Checking SLA compliance. Tx: ${tx.hash}`,
+    });
+
+    const receipt = await tx.wait();
+    
+    // Get SLA info after checking
+    const slaAfter = await contract.getSLA(slaId);
+    console.log('📋 SLA Info after compliance check:', {
+      violationCount: Number(slaAfter.violationCount),
+      basePaymentRate: Number(slaAfter.basePaymentRate),
+      currentPaymentRate: Number(slaAfter.currentPaymentRate),
+      penaltyRate: Number(slaAfter.penaltyRate),
+      creationMetricId: Number(slaAfter.creationMetricId),
+      lastCheckedMetricId: Number(slaAfter.lastCheckedMetricId)
+    });
+    
+    // Analyze events to determine what happened
+    const events = receipt.logs;
+    let resultMessage = "No new violations found";
+    let violationCount = 0;
+    
+    events.forEach((log: any) => {
+      try {
+        const parsed = contract.interface.parseLog(log);
+        console.log('📝 Event detected:', parsed?.name, parsed?.args);
+        
+        if (parsed?.name === 'ViolationDetected') {
+          violationCount++;
+        } else if (parsed?.name === 'PaymentRateAdjusted') {
+          const oldRate = Number(parsed.args?.[1] || 0);
+          const newRate = Number(parsed.args?.[2] || 0);
+          const reduction = oldRate > 0 ? ((oldRate - newRate) / oldRate * 100).toFixed(1) : '0';
+          resultMessage = `${violationCount} violation(s) detected. Payment rate reduced by ${reduction}%`;
+        } else if (parsed?.name === 'StreamCancelled') {
+          resultMessage = `Stream cancelled due to max violations`;
+        } else if (parsed?.name === 'ComplianceChecked') {
+          const violationsFound = Number(parsed.args?.[3] || 0);
+          if (violationsFound === 0) {
+            resultMessage = "Compliance check completed - no violations found";
           }
-        } catch (e) {
-          // Ignore parsing errors for logs from other contracts
         }
-      });
-      
-      setLastCheckTime(new Date());
-      setLastCheckResult(resultMessage);
-      
-      toast.success("Compliance Check Complete", {
-        id: tx.hash,
-        description: resultMessage,
-      });
-      
-    } catch (error: any) {
-      console.error('Error checking compliance:', error);
-      
-      let errorMessage = 'Failed to check compliance';
-      if (error.message.includes('No performance data available')) {
-        errorMessage = 'No performance data available. Generate some data points first.';
-      } else if (error.message.includes('No new performance data to check')) {
-        errorMessage = 'No new data since last check. Generate more data points.';
+      } catch (e) {
+        // Ignore parsing errors for logs from other contracts
       }
-      
-      toast.error(errorMessage ?? "Compliance Check Failed");
-      
-      setLastCheckResult(`Error: ${errorMessage}`);
-    } finally {
-      setIsChecking(false);
+    });
+    
+    setLastCheckTime(new Date());
+    setLastCheckResult(resultMessage);
+    
+    toast.success("Compliance Check Complete", {
+      id: tx.hash,
+      description: resultMessage,
+    });
+    
+  } catch (error: any) {
+    console.error('❌ Error checking compliance:', error);
+    
+    let errorMessage = 'Failed to check compliance';
+    if (error.message.includes('No new performance data to check')) {
+      errorMessage = 'No new data since last check. Generate more data points.';
+    } else if (error.message.includes('No performance data available')) {
+      errorMessage = 'No performance data available. Generate some data points first.';
     }
-  };
+    
+    toast.error("Compliance Check Failed", {
+      description: errorMessage,
+    });
+    
+    setLastCheckResult(`Error: ${errorMessage}`);
+  } finally {
+    setIsChecking(false);
+  }
+};
 
   return (
     <Card>

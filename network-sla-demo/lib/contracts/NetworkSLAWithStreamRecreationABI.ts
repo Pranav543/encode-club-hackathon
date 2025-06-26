@@ -194,4 +194,44 @@ export const NetworkSLAWithStreamRecreationABI = [
     name: "ComplianceChecked",
     type: "event",
   },
+  {
+    "inputs": [
+      { "name": "_serviceProvider", "type": "address" },
+      { "name": "_guaranteedBandwidth", "type": "uint256" },
+      { "name": "_maxLatency", "type": "uint256" },
+      { "name": "_maxViolations", "type": "uint256" },
+      { "name": "_penaltyRate", "type": "uint256" },
+      { "name": "_duration", "type": "uint256" },
+      { "name": "_basePaymentRatePerSecond", "type": "uint256" } // ETH per second in wei
+    ],
+    "name": "createSLA",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+
+  // Updated events to reflect ETH amounts
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "slaId", "type": "uint256" },
+      { "indexed": true, "name": "serviceProvider", "type": "address" },
+      { "indexed": true, "name": "customer", "type": "address" },
+      { "indexed": false, "name": "basePaymentRate", "type": "uint256" }, // ETH per second in wei
+      { "indexed": false, "name": "creationMetricId", "type": "uint256" }
+    ],
+    "name": "SLACreated",
+    "type": "event"
+  },
+
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "streamId", "type": "uint256" },
+      { "indexed": true, "name": "provider", "type": "address" },
+      { "indexed": false, "name": "amount", "type": "uint256" } // ETH amount in wei
+    ],
+    "name": "WithdrawalExecuted",
+    "type": "event"
+  },
 ] as const;
