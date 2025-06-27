@@ -40,6 +40,12 @@ const safeParseEther = (ethAmount: number): string => {
 };
 
 export const convertETHToUSD = (ethAmount: string | number, ethPrice: number): CurrencyDisplay => {
+  // ✅ Handle invalid ETH price gracefully
+  if (!ethPrice || ethPrice <= 0) {
+    console.warn('Invalid ETH price provided, using fallback calculations');
+    ethPrice = 3400; // Fallback price
+  }
+
   const ethValue = typeof ethAmount === 'string' ? parseFloat(ethAmount) : ethAmount;
   const usdValue = ethValue * ethPrice;
   
@@ -55,13 +61,18 @@ export const convertETHToUSD = (ethAmount: string | number, ethPrice: number): C
   };
 };
 
-// FIXED: Convert USD per second to wei per second for contract
 export const convertUSDPerSecondToWeiPerSecond = (usdPerSecond: number, ethPrice: number): {
   ethPerSecond: number;
   weiPerSecond: string;
   totalETHForDuration: (duration: number) => number;
   totalWeiForDuration: (duration: number) => string;
 } => {
+  // ✅ Handle invalid ETH price gracefully
+  if (!ethPrice || ethPrice <= 0) {
+    console.warn('Invalid ETH price provided for conversion, using fallback');
+    ethPrice = 3400; // Fallback price
+  }
+
   console.log('🔄 Converting USD to ETH/Wei:', {
     usdPerSecond,
     ethPrice
@@ -96,6 +107,12 @@ export const convertETHPerSecondToUSD = (weiPerSecond: string | number, ethPrice
   ethPerSecond: number;
 } => {
   try {
+    // ✅ Handle invalid ETH price gracefully
+    if (!ethPrice || ethPrice <= 0) {
+      console.warn('Invalid ETH price provided for display conversion, using fallback');
+      ethPrice = 3400; // Fallback price
+    }
+
     const weiPerSecondBN = typeof weiPerSecond === 'string' ? 
       BigInt(weiPerSecond) : BigInt(weiPerSecond.toString());
     const ethPerSecond = parseFloat(ethers.formatEther(weiPerSecondBN));

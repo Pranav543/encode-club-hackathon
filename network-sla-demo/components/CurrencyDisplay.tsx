@@ -64,7 +64,7 @@ export const ETHPriceIndicator = () => {
       <TrendingUp className="h-4 w-4" />
       <span>ETH: ${ethToUsd.toLocaleString()}</span>
       <span className="text-xs">
-        Updated {lastUpdated.toLocaleTimeString()}
+        Updated: {lastUpdated.toLocaleTimeString()}
       </span>
     </div>
   );

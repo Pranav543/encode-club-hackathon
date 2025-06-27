@@ -45,12 +45,6 @@ export const WalletConnector = () => {
 
   return (
     <div className="space-y-4">
-      {/* ETH Price Display */}
-      <Card>
-        <CardContent className="p-3">
-          <ETHPriceIndicator />
-        </CardContent>
-      </Card>
 
       {/* Demo Account Selection */}
       <Card>

@@ -11,7 +11,6 @@ import { NetworkSLACleanABI } from '@/lib/contracts/NetworkSLACleanABI';
 import { useWallet } from '@/hooks/useWallet';
 import { useETHPrice } from '@/hooks/useETHPrice';
 import { convertETHPerSecondToUSD } from '@/lib/currencyUtils';
-import { CurrentPaymentRateChart } from './CurrentPaymentRateChart';
 
 interface SLAData {
   slaId: number;
@@ -356,7 +355,6 @@ export const SLADashboard = () => {
         </CardContent>
       </Card>
 
-      <CurrentPaymentRateChart slaData={slaData} />
 
       <Card>
         <CardHeader>

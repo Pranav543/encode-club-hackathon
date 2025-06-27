@@ -171,7 +171,7 @@ export const BlockchainPerformanceChart = () => {
               {/* ✅ UPDATED: Bandwidth Line - Neutral line color with green/red dots */}
               <Line 
                 type="monotone" 
-                dataKey="bandwidth" 
+                dataKey="bandwidth"   
                 stroke="#3b82f6" 
                 strokeWidth={2}
                 name="bandwidth"

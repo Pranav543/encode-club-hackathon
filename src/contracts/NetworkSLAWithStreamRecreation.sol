@@ -13,8 +13,8 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         uint256 maxLatency;
         uint256 maxViolations;
         uint256 penaltyRate;
-        uint256 basePaymentRate;    // ETH per second in wei
-        uint256 currentPaymentRate; // ETH per second in wei  
+        uint256 basePaymentRate; // ETH per second in wei
+        uint256 currentPaymentRate; // ETH per second in wei
         uint256 violationCount;
         uint256 startTime;
         uint256 duration;
@@ -29,10 +29,10 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
     struct Stream {
         address from;
         address to;
-        uint256 paymentRate;    // ETH per second in wei
+        uint256 paymentRate; // ETH per second in wei
         uint256 startTime;
-        uint256 totalAmount;    // Total ETH in wei
-        uint256 amountPaid;     // ETH paid so far in wei
+        uint256 totalAmount; // Total ETH in wei
+        uint256 amountPaid; // ETH paid so far in wei
         bool isActive;
         uint256 slaId;
     }
@@ -50,14 +50,14 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         uint256 indexed slaId,
         address indexed serviceProvider,
         address indexed customer,
-        uint256 basePaymentRate,  // ETH per second in wei
+        uint256 basePaymentRate, // ETH per second in wei
         uint256 creationMetricId
     );
     event StreamCreated(
         uint256 indexed streamId,
         uint256 indexed slaId,
         address indexed to,
-        uint256 paymentRate       // ETH per second in wei
+        uint256 paymentRate // ETH per second in wei
     );
     event ViolationDetected(
         uint256 indexed slaId,
@@ -69,8 +69,8 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
     );
     event PaymentRateAdjusted(
         uint256 indexed slaId,
-        uint256 oldRate,          // ETH per second in wei
-        uint256 newRate,          // ETH per second in wei
+        uint256 oldRate, // ETH per second in wei
+        uint256 newRate, // ETH per second in wei
         string reason
     );
     event StreamCancelled(
@@ -82,7 +82,7 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
     event StreamRecreated(
         uint256 indexed newStreamId,
         uint256 indexed slaId,
-        uint256 newPaymentRate,   // ETH per second in wei
+        uint256 newPaymentRate, // ETH per second in wei
         string reason
     );
     event SLATerminated(
@@ -99,7 +99,7 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
     event WithdrawalExecuted(
         uint256 indexed streamId,
         address indexed provider,
-        uint256 amount           // ETH amount in wei
+        uint256 amount // ETH amount in wei
     );
     event StreamBalanceUpdated(uint256 indexed streamId, uint256 newBalance);
 
@@ -114,13 +114,13 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         uint256 _maxViolations,
         uint256 _penaltyRate,
         uint256 _duration,
-        uint256 _basePaymentRatePerSecond    // ETH per second in wei
+        uint256 _basePaymentRatePerSecond // ETH per second in wei
     ) external payable {
         require(_serviceProvider != address(0), "Invalid service provider");
         require(_guaranteedBandwidth > 0, "Bandwidth must be positive");
         require(_maxLatency > 0, "Latency must be positive");
         require(_basePaymentRatePerSecond > 0, "Payment rate must be positive");
-        
+
         // Calculate total required payment: rate per second * duration
         uint256 totalRequired = _basePaymentRatePerSecond * _duration;
         require(msg.value >= totalRequired, "Insufficient payment");
@@ -138,8 +138,8 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
             maxLatency: _maxLatency,
             maxViolations: _maxViolations,
             penaltyRate: _penaltyRate,
-            basePaymentRate: _basePaymentRatePerSecond,        // Store ETH/sec in wei
-            currentPaymentRate: _basePaymentRatePerSecond,     // Start with full rate
+            basePaymentRate: _basePaymentRatePerSecond, // Store ETH/sec in wei
+            currentPaymentRate: _basePaymentRatePerSecond, // Start with full rate
             violationCount: 0,
             startTime: block.timestamp,
             duration: _duration,
@@ -154,9 +154,9 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         streams[streamCounter] = Stream({
             from: msg.sender,
             to: _serviceProvider,
-            paymentRate: _basePaymentRatePerSecond,           // ETH/sec in wei
+            paymentRate: _basePaymentRatePerSecond, // ETH/sec in wei
             startTime: block.timestamp,
-            totalAmount: msg.value,                           // Total ETH sent
+            totalAmount: msg.value, // Total ETH sent
             amountPaid: 0,
             isActive: true,
             slaId: slaCounter
@@ -177,7 +177,10 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         );
     }
 
-    function withdrawFromStream(uint256 streamId, uint256 amount) public nonReentrant {
+    function withdrawFromStream(
+        uint256 streamId,
+        uint256 amount
+    ) public nonReentrant {
         require(streamId > 0 && streamId <= streamCounter, "Invalid stream ID");
 
         Stream storage stream = streams[streamId];
@@ -200,7 +203,9 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         emit StreamBalanceUpdated(streamId, availableBalance - amount);
     }
 
-    function calculateAvailableBalance(uint256 streamId) public view returns (uint256) {
+    function calculateAvailableBalance(
+        uint256 streamId
+    ) public view returns (uint256) {
         require(streamId > 0 && streamId <= streamCounter, "Invalid stream ID");
 
         Stream storage stream = streams[streamId];
@@ -221,14 +226,17 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
             // Calculate pro-rata payment based on time elapsed and current rate
             // stream.paymentRate is already in wei per second
             accumulatedPayment = stream.paymentRate * timeElapsed;
-            
+
             // Ensure we don't exceed total stream amount
             if (accumulatedPayment > stream.totalAmount) {
                 accumulatedPayment = stream.totalAmount;
             }
         }
 
-        return accumulatedPayment > stream.amountPaid ? accumulatedPayment - stream.amountPaid : 0;
+        return
+            accumulatedPayment > stream.amountPaid
+                ? accumulatedPayment - stream.amountPaid
+                : 0;
     }
 
     function withdrawAllFromStream(uint256 streamId) external {
@@ -237,13 +245,19 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         withdrawFromStream(streamId, availableBalance);
     }
 
-    function getWithdrawalInfo(uint256 streamId) external view returns (
-        uint256 totalWithdrawn,
-        uint256 availableBalance, 
-        uint256 totalStreamAmount
-    ) {
+    function getWithdrawalInfo(
+        uint256 streamId
+    )
+        external
+        view
+        returns (
+            uint256 totalWithdrawn,
+            uint256 availableBalance,
+            uint256 totalStreamAmount
+        )
+    {
         require(streamId > 0 && streamId <= streamCounter, "Invalid stream ID");
-        
+
         Stream storage stream = streams[streamId];
         return (
             stream.amountPaid,
@@ -278,51 +292,118 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         bool violationOccurred = false;
         uint256 newViolations = 0;
 
-        for (uint256 metricId = startCheckingFrom; metricId <= endCheckingAt; metricId++) {
-            PerformanceDataGenerator.PerformanceMetric memory metric = performanceContract.getPerformanceMetric(metricId);
+        // FIXED: Count violations per data point, not per violation type
+        for (
+            uint256 metricId = startCheckingFrom;
+            metricId <= endCheckingAt;
+            metricId++
+        ) {
+            PerformanceDataGenerator.PerformanceMetric
+                memory metric = performanceContract.getPerformanceMetric(
+                    metricId
+                );
 
-            if (keccak256(abi.encodePacked(metric.dataType)) == keccak256(abi.encodePacked("violation"))) {
-                bool currentViolation = false;
+            if (
+                keccak256(abi.encodePacked(metric.dataType)) ==
+                keccak256(abi.encodePacked("violation"))
+            ) {
+                bool hasLatencyViolation = false;
+                bool hasBandwidthViolation = false;
+                bool currentDataPointHasViolation = false;
 
+                // Check latency violation
                 if (metric.latency > sla.maxLatency) {
-                    newViolations++;
-                    currentViolation = true;
-                    emit ViolationDetected(_slaId, metricId, "Latency", metric.latency, sla.maxLatency, sla.violationCount + newViolations);
+                    hasLatencyViolation = true;
+                    currentDataPointHasViolation = true;
+                    emit ViolationDetected(
+                        _slaId,
+                        metricId,
+                        "Latency",
+                        metric.latency,
+                        sla.maxLatency,
+                        sla.violationCount + newViolations + 1
+                    );
                 }
 
+                // Check bandwidth violation
                 if (metric.bandwidth < sla.guaranteedBandwidth) {
-                    newViolations++;
-                    currentViolation = true;
-                    emit ViolationDetected(_slaId, metricId, "Bandwidth", metric.bandwidth, sla.guaranteedBandwidth, sla.violationCount + newViolations);
+                    hasBandwidthViolation = true;
+                    currentDataPointHasViolation = true;
+                    emit ViolationDetected(
+                        _slaId,
+                        metricId,
+                        "Bandwidth",
+                        metric.bandwidth,
+                        sla.guaranteedBandwidth,
+                        sla.violationCount + newViolations + 1
+                    );
                 }
 
-                if (currentViolation) {
+                // FIX: Only increment violation count ONCE per data point
+                if (currentDataPointHasViolation) {
+                    newViolations++; // Only increment once per data point regardless of violation types
                     violationOccurred = true;
+
+                    // Emit a combined violation event if both types violated
+                    if (hasLatencyViolation && hasBandwidthViolation) {
+                        emit ViolationDetected(
+                            _slaId,
+                            metricId,
+                            "Combined",
+                            0,
+                            0,
+                            sla.violationCount + newViolations
+                        );
+                    }
                 }
             }
         }
 
         sla.lastCheckedMetricId = currentMetricCount;
-        emit ComplianceChecked(_slaId, startCheckingFrom, endCheckingAt, newViolations);
+        emit ComplianceChecked(
+            _slaId,
+            startCheckingFrom,
+            endCheckingAt,
+            newViolations
+        );
 
         if (violationOccurred && newViolations > 0) {
             sla.violationCount += newViolations;
 
             uint256 oldRate = sla.currentPaymentRate;
 
-            // Apply penalty for each violation: reduce by penaltyRate%
+            // Apply penalty for each violation data point
             for (uint256 i = 0; i < newViolations; i++) {
-                sla.currentPaymentRate = (sla.currentPaymentRate * (100 - sla.penaltyRate)) / 100;
+                sla.currentPaymentRate =
+                    (sla.currentPaymentRate * (100 - sla.penaltyRate)) /
+                    100;
             }
 
-            emit PaymentRateAdjusted(_slaId, oldRate, sla.currentPaymentRate, 
-                string(abi.encodePacked("Applied ", uintToString(newViolations), " violation penalties of ", uintToString(sla.penaltyRate), "% each")));
+            emit PaymentRateAdjusted(
+                _slaId,
+                oldRate,
+                sla.currentPaymentRate,
+                string(
+                    abi.encodePacked(
+                        "Applied ",
+                        uintToString(newViolations),
+                        " data point penalties of ",
+                        uintToString(sla.penaltyRate),
+                        "% each"
+                    )
+                )
+            );
 
             if (sla.violationCount >= sla.maxViolations) {
                 Stream storage currentStream = streams[sla.currentStreamId];
                 currentStream.isActive = false;
 
-                emit StreamCancelled(sla.currentStreamId, _slaId, "Maximum violations exceeded", sla.violationCount);
+                emit StreamCancelled(
+                    sla.currentStreamId,
+                    _slaId,
+                    "Maximum violations exceeded",
+                    sla.violationCount
+                );
 
                 if (sla.currentPaymentRate > 0) {
                     streamCounter++;
@@ -335,16 +416,26 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
                         to: sla.serviceProvider,
                         paymentRate: sla.currentPaymentRate,
                         startTime: block.timestamp,
-                        totalAmount: sla.currentPaymentRate * (sla.duration / 2),
+                        totalAmount: sla.currentPaymentRate *
+                            (sla.duration / 2),
                         amountPaid: 0,
                         isActive: true,
                         slaId: _slaId
                     });
 
-                    emit StreamRecreated(streamCounter, _slaId, sla.currentPaymentRate, "Stream recreated after max violations");
+                    emit StreamRecreated(
+                        streamCounter,
+                        _slaId,
+                        sla.currentPaymentRate,
+                        "Stream recreated after max violations"
+                    );
                 } else {
                     sla.isActive = false;
-                    emit SLATerminated(_slaId, "Payment rate reduced to zero", sla.violationCount);
+                    emit SLATerminated(
+                        _slaId,
+                        "Payment rate reduced to zero",
+                        sla.violationCount
+                    );
                 }
             } else {
                 // Update current stream payment rate
@@ -375,7 +466,9 @@ contract NetworkSLAWithStreamRecreation is ReentrancyGuard, Ownable {
         return slas[_slaId];
     }
 
-    function getStream(uint256 _streamId) external view returns (Stream memory) {
+    function getStream(
+        uint256 _streamId
+    ) external view returns (Stream memory) {
         return streams[_streamId];
     }
 
